@@ -1,10 +1,12 @@
 // One round of the agent loop. The browser runs the tools; this function only adds the
 // Gemini API key (kept secret on the server) and forwards the request.
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const ALLOWED_TOOLS = new Set([
   "check_stock", "check_seasonality", "check_payment_friction",
   "check_reach", "estimate_actions", "get_past_results",
 ]);
+
+export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -23,16 +25,22 @@ export default async function handler(req, res) {
   if (!first.startsWith("You are Revenue Sentinel")) return res.status(400).json({ error: "bad prompt" });
 
   try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        contents,
-        tools: [{ functionDeclarations }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-      }),
-    });
-    const j = await r.json();
+    // Free-tier models are sometimes busy (503). Retry a few times before giving up.
+    let r, j;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          contents,
+          tools: [{ functionDeclarations }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+        }),
+      });
+      j = await r.json();
+      if (r.ok || ![500, 503].includes(r.status)) break;
+      await new Promise(done => setTimeout(done, 1500 * (attempt + 1)));
+    }
     if (!r.ok) return res.status(r.status === 429 ? 429 : 502).json({ error: j?.error?.status || "upstream_error", message: j?.error?.message });
     const content = j?.candidates?.[0]?.content;
     if (!content) return res.status(502).json({ error: "empty_reply" });
