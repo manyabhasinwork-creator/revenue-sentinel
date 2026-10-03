@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   if (!URL || !KEY) return res.status(500).json({ error: "Supabase is not configured" });
   try {
     if (req.method === "GET") {
-      const reset = await sb("resets?select=created_at&order=created_at.desc&limit=1");
+      const reset = await sb("resets?select=created_at&order=id.desc&limit=1");
       const since = reset[0]?.created_at || "1970-01-01T00:00:00Z";
       const f = `created_at=gt.${encodeURIComponent(since)}`;
       const [campaigns, feedback, events] = await Promise.all([
