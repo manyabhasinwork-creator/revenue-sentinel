@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/data/app_data.json", "destination": "/app_data.json" }
+  ]
+}
