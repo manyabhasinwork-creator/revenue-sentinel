@@ -258,185 +258,285 @@ function fastForward(){
   addLog("code", `Learned: ${a.id} estimate updated from +${expected} to +${updated} pts`, "used in the next run");
 }
 
-/* ---------------- charts ---------------- */
-function lineChart(code, opts){
-  const data=Object.entries(A.monthly_gap[code]).filter(([m])=>m>="2025-01").map(([m,v])=>({m,v}));
-  const W=640,H=200,L=40,R=16,T=18,B=30; const vals=data.map(d=>d.v);
-  const lo=Math.floor(Math.min(...vals)/10)*10, hi=Math.ceil(Math.max(...vals)/10)*10+5;
-  const x=i=>L+i*(W-L-R)/(data.length-1), y=v=>T+(hi-v)*(H-T-B)/(hi-lo);
-  let g=""; for(let v=lo; v<=hi; v+=10) g+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-8}" y="${y(v)+4}" text-anchor="end">${v}</text>`;
-  const pts=data.map((d,i)=>`${x(i)},${y(d.v)}`).join(" ");
-  let lab=""; const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  data.forEach((d,i)=>{ const [yy,mm]=d.m.split("-"); if(mm==="01"||mm==="06"||i===data.length-1) lab+=`<text x="${x(i)}" y="${H-10}" text-anchor="middle">${MN[+mm-1]} ${yy.slice(2)}</text>`; });
-  let sh=""; (opts.shade||[]).forEach(([a,b,t])=>{ const i1=data.findIndex(d=>d.m===a), i2=data.findIndex(d=>d.m===b); if(i1>-1&&i2>-1) sh+=`<rect x="${x(i1)-6}" y="${T}" width="${x(i2)-x(i1)+12}" height="${H-T-B}" fill="var(--${opts.c}-soft)"/><text x="${(x(i1)+x(i2))/2}" y="${T+12}" text-anchor="middle" style="fill:var(--${opts.c});font-weight:600">${t}</text>`; });
-  return `<div class="chartwrap"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(opts.aria)}">${sh}${g}<polygon points="${L},${y(lo)} ${pts} ${x(data.length-1)},${y(lo)}" fill="var(--accent)" opacity=".08"/><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"/><circle cx="${x(data.length-1)}" cy="${y(vals[vals.length-1])}" r="4" fill="var(--accent)"/>${lab}<text x="${L}" y="${T-6}">days between orders</text></svg></div>`;
+
+/* =====================================================================
+   SIMPLE UI  (merchant-first, picture-led, one thing at a time)
+   ===================================================================== */
+const TMPL={t1:n=>`Hi {first_name}, it's been a while since your last <b>${n}</b>. Running low?\nReorder in one tap: <b>{reorder_link}</b>`, t2:n=>`Hi {first_name}, your <b>${n}</b> routine is due. We saved your last order.\nPay with UPI in one tap: <b>{reorder_link}</b>`};
+S.view = "home"; S.sheetOpen = null; S.runStart = 0;
+
+const SHORT = {SER:"Vitamin C Serum", SUN:"Sunscreen", LOT:"Body Lotion", CLN:"Cleanser"};
+const TINT  = {SER:"#FCE7D6", SUN:"#FFF1C2", LOT:"#E6E3FA", CLN:"#DDF2E6"};
+const NAMES = ["Priya","Ananya","Riya","Sneha","Kavya","Aditi","Meera","Isha","Neha","Tanvi","Rohan","Arjun","Zoya","Nikhil"];
+const AV    = ["#F6C9A8","#C9E4D3","#D6D0F7","#FBE3A1","#F7C6D0","#BFDDF3"];
+
+/* plain-language helpers */
+function money(n){ n=Math.round(n); if(n>=1e7) return "₹"+trim(n/1e7)+" crore"; if(n>=1e5) return "₹"+trim(n/1e5)+" lakh"; return "₹"+n.toLocaleString("en-IN"); }
+function trim(x){ return (Math.round(x*10)/10).toString().replace(/\.0$/,""); }
+function weeks(d){ const w=Math.max(1,Math.round(d/7)); return w===1?"a week":w+" weeks"; }
+function oneIn(pct){ return pct>0 ? "about 1 in "+Math.max(2,Math.round(100/pct)) : "almost nobody"; }
+function people(n){ return Math.round(n).toLocaleString("en-IN"); }
+
+/* product pictures, drawn in code so there are no image files */
+function art(code, size){
+  const s=size||120;
+  const shapes = {
+    SER:`<rect x="44" y="40" width="32" height="56" rx="7" fill="#E39A5B"/><rect x="48" y="44" width="24" height="20" rx="3" fill="#F6D4B4"/><rect x="52" y="24" width="16" height="18" rx="3" fill="#2B2B2B"/><rect x="55" y="12" width="10" height="14" rx="5" fill="#2B2B2B"/><text x="60" y="58" font-size="8" text-anchor="middle" fill="#8A4A1C" font-weight="700">C</text>`,
+    SUN:`<path d="M40 30h40l-4 70H44z" fill="#F4C24A"/><rect x="50" y="18" width="20" height="14" rx="3" fill="#2B2B2B"/><rect x="46" y="50" width="28" height="22" rx="4" fill="#FFF6D6"/><circle cx="60" cy="61" r="6" fill="#F4A21E"/>`,
+    LOT:`<rect x="40" y="44" width="40" height="58" rx="10" fill="#8C84E0"/><rect x="47" y="58" width="26" height="24" rx="4" fill="#ECEAFD"/><rect x="55" y="30" width="10" height="16" fill="#2B2B2B"/><rect x="55" y="24" width="24" height="7" rx="3" fill="#2B2B2B"/>`,
+    CLN:`<rect x="42" y="36" width="36" height="66" rx="12" fill="#5FB98A"/><rect x="48" y="54" width="24" height="26" rx="4" fill="#E6F6EC"/><rect x="52" y="22" width="16" height="16" rx="4" fill="#2B2B2B"/>`,
+  };
+  return `<svg viewBox="0 0 120 120" width="${s}" height="${s}" aria-hidden="true"><ellipse cx="60" cy="106" rx="26" ry="5" fill="rgba(0,0,0,.08)"/>${shapes[code]}</svg>`;
 }
-function stockChart(){
-  const s=A.sun_weekly, W=640,H=180,L=44,R=10,T=14,B=28; const top=Math.ceil(Math.max(...s.map(d=>d.orders))/500)*500; const bw=(W-L-R)/s.length; const y=v=>T+(top-v)*(H-T-B)/top;
-  const so=["24 Aug","31 Aug","07 Sep"]; let g=""; for(let v=0; v<=top; v+=1000) g+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-8}" y="${y(v)+4}" text-anchor="end">${fmt(v)}</text>`;
-  const bars=s.map((d,i)=>`<rect x="${L+i*bw+3}" y="${y(d.orders)}" width="${bw-6}" height="${Math.max(0,y(0)-y(d.orders))}" rx="3" fill="${so.includes(d.week)?'var(--held)':'var(--ctrl)'}"/>`+(i%3===0?`<text x="${L+i*bw+bw/2}" y="${H-10}" text-anchor="middle">${d.week}</text>`:"")).join("");
-  const i0=s.findIndex(d=>d.week===so[0]);
-  return `<div class="chartwrap"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Weekly sunscreen orders drop to near zero during the stockout">${g}${bars}<text x="${L+(i0+1.5)*bw}" y="${y(0)-40}" text-anchor="middle" style="fill:var(--held);font-weight:600">Out of stock</text><text x="${L}" y="${T-3}">orders per week</text></svg></div>`;
+function tile(code, size, extra){ return `<div class="ptile ${extra||""}" style="--tint:${TINT[code]}">${art(code,size)}</div>`; }
+
+/* who is slipping away: a few real flagged customers from the sample data */
+function slipping(code, n){
+  const k=pidx(code), out=[];
+  for (let i=0;i<NC && out.length<n;i++){
+    if (C.p[i]!==k || C.r[i]/C.b[i]<1.3 || !C.w[i] || C.c[i]) continue;
+    out.push({name:NAMES[out.length%NAMES.length], usual:C.b[i], now:C.r[i], color:AV[out.length%AV.length]});
+  }
+  return out;
 }
+function avatar(p, sz){ return `<span class="av" style="background:${p.color};width:${sz}px;height:${sz}px">${p.name[0]}</span>`; }
+
+/* friendly checklist of what the agent is doing */
+function friendly(e){
+  const prod = Object.keys(SHORT).find(c=>e.text.includes(pname(c)));
+  const p = prod ? SHORT[prod] : "";
+  if (e.text.startsWith("Scanned")) return `Looked at ${people(NC)} regular customers`;
+  if (e.text.startsWith("Reading past")) return "Remembered what worked before";
+  if (e.text.startsWith("Checking stock")) return `Checked ${p} was in stock`;
+  if (e.text.startsWith("Checking last year")) return `Compared ${p} with last year`;
+  if (e.text.startsWith("Checking payment")) return `Looked for card problems`;
+  if (e.text.startsWith("Checking who")) return `Checked who's okay to message`;
+  if (e.text.startsWith("Estimating")) return `Worked out the best nudge`;
+  if (e.text.startsWith("Gemini is")) return e.state==="busy" ? "Thinking it through…" : (e.res.startsWith("Couldn't") ? "AI was busy, used backup rules" : "Decided what to do");
+  if (e.text.startsWith("Guardrail")) return "Made sure it follows your rules";
+  if (e.who==="guard") return "Your rules changed one decision";
+  return null;
+}
+function checklist(){
+  const items = S.log.slice(S.runStart).filter(e=>e.who!=="sep").map(e=>({t:friendly(e), busy:e.state==="busy"})).filter(x=>x.t);
+  items.sort((a,b)=>(a.busy?1:0)-(b.busy?1:0));
+  const seen=new Set(); const uniq=items.filter(x=>{ if(seen.has(x.t)) return false; seen.add(x.t); return true; });
+  return `<ul class="checks" aria-live="polite">${uniq.map(x=>`<li class="${x.busy?"busy":""}"><span class="tick">${x.busy?'<span class="spin"></span>':"✓"}</span>${esc(x.t)}</li>`).join("")}</ul>`;
+}
+function renderLog(){ const el=$("checklist"); if(el) el.innerHTML=checklist(); const al=$("activity"); if(al) al.innerHTML=activityList(); }
 
 /* ---------------- views ---------------- */
-const STEPS=[{id:"run",t:"Run & alerts"},{id:"evidence",t:"Evidence"},{id:"decide",t:"Decide"},{id:"customer",t:"Customer view"},{id:"results",t:"Results"},{id:"activity",t:"Activity log"}];
-function go(id){ S.step=id; render(); window.scrollTo({top:0}); }
-function toast(t){ const el=$("toast"); el.textContent=t; el.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>el.hidden=true,2600); }
+function greeting(){ const h=new Date().getHours(); return h<12?"Good morning":h<17?"Good afternoon":"Good evening"; }
+const ACT_COPY = {
+  reminder:{title:"Send a friendly reminder", sub:"A WhatsApp nudge with a one-tap reorder link. No discount needed."},
+  free_ship:{title:"Remind them, with free delivery", sub:"A WhatsApp nudge plus free delivery on the reorder."},
+  discount:{title:"Remind them, with 10% off", sub:"A WhatsApp nudge plus a 10% discount on the reorder."},
+};
 
-function rail(){
-  const idx=STEPS.findIndex(s=>s.id===S.step); const names={1:"Recommend only",2:"Prepare for approval",3:"Run pre-approved actions"};
-  $("rail").innerHTML = STEPS.map((s,i)=>`<button class="step ${i<idx?'done':''}" aria-current="${s.id===S.step}" data-go="${s.id}" type="button"><span class="n">${i+1}</span>${s.t}</button>`).join("")
-   + `<div class="foot"><span class="label">Autonomy level ${S.autonomy} of 3</span><div class="level">${[1,2,3].map(i=>`<i class="${i<=S.autonomy?'on':''}"></i>`).join("")}</div><span>${names[S.autonomy]}</span></div>`;
-  $("rail").querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
+function vHome(){
+  const p = plan();
+  let hero;
+  if (S.running){
+    hero = `<section class="hero"><div class="hero-text"><span class="eyebrow">Sentinel is checking</span><h2>Looking at how your regulars are doing</h2><div id="checklist">${checklist()}</div>
+      <button class="btn ghost-light" id="stop" type="button">Stop</button></div>
+      <div class="hero-art">${["SER","SUN","LOT","CLN"].map(c=>tile(c,74,"small")).join("")}</div></section>`;
+  } else if (!S.decisions){
+    hero = `<section class="hero"><div class="hero-text"><span class="eyebrow">Your weekly check</span><h2>Let's see if any regulars are drifting away</h2>
+      <p>I'll look at every repeat customer, check what's going on, and only bother you if something's worth doing.</p>
+      <button class="btn light" id="runBtn" type="button" ${S.paused?"disabled":""}>${S.paused?"Sentinel is paused":"Check my store"}</button></div>
+      <div class="hero-art">${["SER","SUN","LOT","CLN"].map(c=>tile(c,74,"small")).join("")}</div></section>`;
+  } else if (p){
+    const d=p.act, s=p.s;
+    hero = `<section class="hero"><div class="hero-text"><span class="eyebrow">1 thing needs you</span><h2>${esc(SHORT[d.product_code])} regulars are coming back later</h2>
+      <p>They usually reorder every ${weeks(s.usual_days)}. Lately it's closer to ${weeks(s.now_days)}. If nothing changes, about <b>${money(s.revenue_at_risk_60d)}</b> could slip away over the next two months.</p>
+      ${S.approved?`<button class="btn light" data-go="${S.result?"results":"sent"}" type="button">${S.result?"See how it went":"See what I sent"}</button>`:`<button class="btn light" data-go="suggest" type="button">See what I'd do</button>`}</div>
+      <div class="hero-art one">${tile(d.product_code,170,"big")}</div></section>`;
+  } else {
+    hero = `<section class="hero calm"><div class="hero-text"><span class="eyebrow">All good</span><h2>Nothing needs you today</h2><p>I checked everything. I'll keep watching.</p><button class="btn light" id="runBtn" type="button">Check again</button></div></section>`;
+  }
+
+  let people_ = "";
+  if (p && !S.running){
+    const ppl = slipping(p.act.product_code, 8);
+    people_ = `<section><div class="sec-head"><h3>Regulars drifting away</h3><span class="muted">${people(p.s.customers_slowing)} in total</span></div>
+      <div class="hscroll">${ppl.map(x=>`<div class="person">${avatar(x,52)}<b>${x.name}</b><span>Usually every ${weeks(x.usual)}</span><span class="late">Now ${weeks(x.now)}</span></div>`).join("")}</div></section>`;
+  }
+
+  const status = d => !d ? {cls:"", t:"Not checked yet"} :
+    d.decision==="act" ? {cls:"act", t:"Needs you"} :
+    d.reason==="stockout" ? {cls:"held", t:"Was out of stock"} :
+    d.reason==="seasonal" ? {cls:"held", t:"Seasonal dip"} : {cls:"ok", t:"All good"};
+  const prods = `<section><div class="sec-head"><h3>Your products</h3>${S.decisions&&!S.running?`<span class="muted">Tap one to see what I found</span>`:""}</div>
+    <div class="pgrid">${P.map(pr=>{ const d=S.decisions?.find(x=>x.product_code===pr.code); const st=status(S.running?null:d);
+      return `<button class="pcard" data-prod="${pr.code}" type="button" ${!d||S.running?"disabled":""}>${tile(pr.code,110)}<span class="pname">${SHORT[pr.code]}</span><span class="pill ${st.cls}">${st.t}</span></button>`; }).join("")}</div></section>`;
+
+  const foot = S.decisions && !S.running ? `<p class="foot">${S.mode==="live"?"Decided live by an AI agent (Gemini)":"Decided by backup rules (AI was busy)"}, then checked against your rules. <a href="#" data-go="activity">See everything it did</a></p>` : "";
+  return hero + people_ + prods + foot;
 }
 
-function logHtml(entries){
-  return entries.map(e => e.who==="sep" ? `<div class="le" style="background:var(--surface)"><span class="who">${e.t}</span><span></span><b>${esc(e.text)}</b></div>` :
-    `<div class="le"><span class="who ${e.who==="ai"?"ai":e.who==="guard"?"guard":e.who==="you"?"you":""}">${{ai:"AI agent",code:"Code",guard:"Guardrail",you:"You"}[e.who]}</span>
-     ${e.state==="busy"?'<span class="spin"></span>':e.who==="ai"?'<span class="dotai"></span>':e.who==="guard"?'<span class="dotg"></span>':'<span class="dotok">✓</span>'}
-     <span><span>${esc(e.text)}</span>${e.state==="busy"&&e.text.startsWith("Gemini is")?` <span class="num muted" id="elapsed">${S.elapsed}s</span>`:""}${e.res?`<br><span class="res">${esc(e.res)}</span>`:""}</span></div>`).join("");
-}
-function renderLog(){ const el=$("agentlog"); if(el){ el.innerHTML=logHtml(S.log.slice(-40)); el.scrollTop=el.scrollHeight; } const al=$("fulllog"); if(al) al.innerHTML=logHtml(S.log); }
-
-function modeChip(){ if(!S.mode) return ""; return S.mode==="live" ? `<span class="mode">Decided live by Gemini</span>` : `<span class="mode off">${S.mode==="fallback"?"AI unavailable, offline rules used":"Offline rules (no AI)"}</span>`; }
-
-function vRun(){
-  const head = `<div class="head"><span class="label">Dewleaf Skincare (fictional) · data to 1 Oct 2026</span><h1>${S.decisions ? `${S.decisions.length} products checked. ${S.decisions.filter(d=>d.decision==="act").length} need${S.decisions.filter(d=>d.decision==="act").length===1?"s":""} your decision.` : "Run Sentinel on this week's data"}</h1></div>`;
-  const runCard = `<div class="card"><div class="runbar"><div style="display:flex;flex-direction:column;gap:4px"><h2>${S.running?"Sentinel is working…":S.decisions?"Last run finished":"Ready"}</h2>
-      <span class="muted" style="font-size:14px">Code finds the changes. The AI agent (Gemini) investigates with tools and decides. Your guardrails check every decision.</span></div>
-      <div class="actions">${S.running?`<button class="btn" id="stop" type="button">Stop</button>`:`<button class="btn primary" id="runBtn" type="button" ${S.paused?"disabled":""}>${S.decisions?"Run again":"Run Sentinel"}</button>`}
-      ${S.memoryOk===false?`<span class="muted" style="font-size:13px">Memory offline: this visit won't be saved.</span>`:""}</div></div>
-      ${S.paused?`<div class="paused-overlay">The agent is paused. Turn it back on to run.</div>`:""}
-      ${S.log.length?`<div class="agentlog" id="agentlog" aria-live="polite">${logHtml(S.log.slice(-40))}</div>`:""}</div>`;
-  if (!S.decisions) return head + runCard + (S.running?"":`<div class="empty"><b>No run yet</b><span>Press Run Sentinel. It scans ${fmt(NC)} repeat customers, then the AI agent checks stock, last year's pattern, payment problems and who can be messaged before deciding anything.</span></div>`);
-  const order={act:0,hold:1,monitor:2};
-  const cards = [...S.decisions].sort((a,b)=>order[a.decision]-order[b.decision]).map(d => {
-    const s=S.scan.find(x=>x.code===d.product_code); const cls=d.decision==="act"?"act":d.decision==="hold"?"held":"ok";
-    const pill=d.decision==="act"?`<span class="pill act">Needs your decision</span>`:d.decision==="hold"?`<span class="pill held">Held: ${esc(d.reason)}</span>`:`<span class="pill ok">Monitoring</span>`;
-    let detail="";
-    if (S.open===d.product_code){
-      detail = `<div class="detail"><p>${esc(d.found)}</p>${d.reason==="stockout"&&d.product_code==="SUN"?stockChart():d.reason==="seasonal"?lineChart(d.product_code,{aria:"Reorder gap rises every June to August",shade:[["2025-06","2025-08","Last year"],["2026-06","2026-07","This year"]],c:"held"}):""}<p class="muted">${esc(d.why)}</p></div>`;
-    }
-    return `<button class="alert ${cls}" data-alert="${d.product_code}" data-dec="${d.decision}" type="button" aria-expanded="${S.open===d.product_code}"><span class="stripe"></span>
-      <span class="body"><span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${pill}<span class="muted" style="font-size:13px">${esc(s.name)}</span></span>
-      <h3>${esc(d.headline)}</h3><span class="muted" style="font-size:14px">${d.decision==="act"?`${fmt(s.customers_slowing)} regulars · usual ${s.usual_days} days → now ${s.now_days} days`:esc(d.why)}</span>
-      ${d.guard.map(g=>`<span class="guardnote">⚑ ${esc(g)}</span>`).join("")}${detail}</span>
-      <span class="side">${d.decision==="monitor"?"":`<span class="num" style="font-weight:600">${inr(s.revenue_at_risk_60d)}</span><span class="muted" style="font-size:12.5px">${d.decision==="act"?"at risk, 60 days":"no spend"}</span>`}</span></button>`;
-  }).join("");
-  return head + runCard + `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${modeChip()}<span class="muted" style="font-size:13px">Tap a held alert to see why Sentinel didn't act.</span></div><div style="display:flex;flex-direction:column;gap:10px">${cards}</div>`;
+function vSuggest(){
+  const p=plan(); if(!p) return vHome();
+  const d=p.act, s=p.s, opts=estimate(d.product_code), o=opts.find(x=>x.action===S.choice)||opts[0];
+  const copy=ACT_COPY[o.action];
+  const msg=TMPL[S.template](esc(SHORT[d.product_code])).replace("{first_name}","Priya").replace("<b>{reorder_link}</b>","").replace("\n","<br>");
+  return `<button class="back" data-go="home" type="button">← Back</button>
+  <div class="split">
+    <div class="col">
+      ${tile(d.product_code,200,"hero-tile")}
+      <div class="phone-msg"><span class="from">Dewleaf on WhatsApp</span><div class="bubble"><span>${msg}</span><span class="cta">Reorder in one tap</span></div></div>
+    </div>
+    <div class="col">
+      <span class="eyebrow dark">My suggestion</span>
+      <h1>${copy.title}</h1>
+      <p class="lead">${copy.sub}</p>
+      <div class="expect"><span class="big-emoji" aria-hidden="true">🎯</span><p>I expect ${oneIn(o.expected_lift_pts)} to come back because of it. That's roughly <b>${money(o.extra_revenue)}</b>, for about ${money(o.cost)} in messages.</p></div>
+      <h3>Why I think this</h3>
+      <ul class="why">
+        <li><span class="ic ok">✓</span>Still in stock, so they can buy</li>
+        <li><span class="ic ok">✓</span>Not a seasonal dip. Last year was steady</li>
+        <li><span class="ic warn">!</span>${people(s.expired_card)} have an expired card. I'll send them a card update link instead</li>
+        <li><span class="ic info">i</span>${people(s.not_opted_in)} haven't said yes to WhatsApp, so I'll leave them alone</li>
+      </ul>
+      <details class="unsure"><summary>What I'm not sure about</summary><p>${esc(d.dont_know||"Payment data can't tell me why they slowed down, like price or a competitor.")}</p></details>
+      <p class="fair">I'll keep 1 in 10 of them aside without a message, so we can see what the reminder really did.</p>
+      ${S.paused?`<p class="paused">Sentinel is paused. Turn it back on in Settings to send.</p>`:""}
+      <div class="cta-row">
+        <button class="btn primary big" id="send" type="button" ${S.paused?"disabled":""}>Send to ${people(p.nSend)} regulars</button>
+        <div class="cta-sub"><button class="btn soft" data-sheet="options" type="button">Other ways</button><button class="btn soft" data-sheet="notnow" type="button">Not now</button></div>
+      </div>
+    </div>
+  </div>`;
 }
 
-function needRun(){ return `<div class="empty"><b>Nothing here yet</b><span>Run Sentinel first.</span><button class="btn primary" data-go="run" type="button">Go to Run</button></div>`; }
-
-function vEvidence(){
-  const p=plan(); if(!p) return S.decisions? `<div class="empty"><b>No change worth acting on in this run</b><span>Every alert was held or is being monitored.</span></div>` : needRun();
-  const {act:d, s}=p; const se=toolSeason(d.product_code), st=toolStock(d.product_code);
-  return `<div class="head"><span class="pill act" style="align-self:flex-start">Needs your decision</span><h1>${esc(d.headline)}</h1><p class="muted">${fmt(s.customers_slowing)} of ${fmt(s.repeat_customers)} ${esc(s.name)} regulars · ${modeChip()}</p></div>
-  <div class="grid4">
-    <div class="card stat"><span class="v num">${s.usual_days} → ${s.now_days}</span><span class="k">days between orders</span></div>
-    <div class="card stat"><span class="v num">+${s.median_change_pct}%</span><span class="k">slower than their own normal (median)</span></div>
-    <div class="card stat"><span class="v num">${inr(s.revenue_at_risk_60d)}</span><span class="k">at risk, next 60 days</span></div>
-    <div class="card stat"><span class="v" style="text-transform:capitalize">${esc(d.confidence)}</span><span class="k">confidence (agent's call)</span></div></div>
-  <div class="card"><h2>${esc(s.name)} regulars changed rhythm in June</h2>${lineChart(d.product_code,{aria:"Reorder gap flat, then a step up from June 2026",shade:[["2026-06","2026-07","Change"]],c:"act"})}</div>
-  <div class="kfsd">
-    <div class="card"><span class="label">What I know</span><p>${esc(d.know)}</p></div>
-    <div class="card"><span class="label">What I found</span><p>${esc(d.found)}</p></div>
-    <div class="card"><span class="label">What I suspect</span><p>${esc(d.suspect)}</p></div>
-    <div class="card"><span class="label">What I don't know</span><p>${esc(d.dont_know)}</p></div></div>
-  <div class="card"><h2>Checks (run by the agent's tools)</h2><div class="checks">
-    <div class="check"><span class="ic ok">✓</span><div><b>Stock</b><p class="muted">${st.in_stock_whole_period?"In stock the whole period (connected store).":"Stockout found."}</p></div><span class="pill ok">Clear</span></div>
-    <div class="check"><span class="ic ok">✓</span><div><b>Season</b><p class="muted">Same months last year: ${se.same_months_last_year_slower_by_pct}% change, so not seasonal.</p></div><span class="pill ok">Clear</span></div>
-    <div class="check"><span class="ic warn">!</span><div><b>Payment problems</b><p class="muted">${fmt(s.expired_card)} have an expired saved card and a recent failed payment. They get a card update link, not a reminder.</p></div><span class="pill held">Handled separately</span></div>
-    <div class="check"><span class="ic warn">!</span><div><b>Who can be messaged</b><p class="muted">${fmt(s.not_opted_in)} haven't opted in and won't be contacted. ${fmt(s.reachable)} can be.</p></div><span class="pill held">Excluded</span></div></div></div>
-  <div class="actions"><button class="btn primary" data-go="decide" type="button">See recommendation</button></div>`;
-}
-
-const TMPL={t1:n=>`Hi {first_name}, it's been a while since your last <b>${n}</b>. Running low?\nReorder in one tap: <b>{reorder_link}</b>`, t2:n=>`Hi {first_name}, your <b>${n}</b> routine is due. We saved your last order.\nPay with UPI in one tap: <b>{reorder_link}</b>`};
-function vDecide(){
-  const p=plan(); if(!p) return S.decisions? `<div class="empty"><b>Nothing to decide in this run</b></div>` : needRun();
-  const {act:d, s, nCtrl, nSend}=p; const opts=estimate(d.product_code);
-  const rows = opts.map(o => `<label class="opt ${S.choice===o.action?'sel':''}" for="opt_${o.action}"><input type="radio" name="opt" id="opt_${o.action}" value="${o.action}" ${S.choice===o.action?'checked':''} ${o.allowed_by_merchant_limits?'':'disabled'} ${S.approved?'disabled':''}>
-    <div style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font-weight:600">${esc(o.label)} ${o.action===d.action?'<span class="pill acc">Agent recommends</span>':''}</span><span class="muted" style="font-size:13px">+${o.expected_lift_pts} pts reorder rate expected${o.allowed_by_merchant_limits?"":" · above your incentive limit"}</span></div>
-    <div class="c hide-sm"><span class="num">${inr(o.extra_revenue)}</span><span class="k">extra revenue</span></div><div class="c hide-sm"><span class="num">${inr(o.cost)}</span><span class="k">cost</span></div><div class="c"><span class="num" style="font-weight:600">${inr(o.extra_profit)}</span><span class="k">extra profit</span></div></label>`).join("");
-  let status="";
-  if (S.approved) status=`<div class="banner ok"><b>${S.approved.auto?"Auto-approved within your limits.":"Approved."}</b>&nbsp;Sent to ${fmt(nSend)} customers. ${fmt(nCtrl)} held back for comparison.</div><div class="actions"><button class="btn primary" data-go="customer" type="button">See what the customer gets</button><button class="btn" data-go="results" type="button">Go to results</button></div>`;
-  else if (S.rejected) status=`<div class="banner held"><b>Not sent.</b>&nbsp;Feedback saved: "${esc(S.rejected)}". The agent reads this on the next run.</div>`;
-  return `<div class="head"><span class="label">${esc(s.name)} regulars · ${fmt(s.reachable)} reachable</span><h1>${esc(labelOf(d.action))}</h1><p class="muted">${esc(d.why)}</p></div>
-  <div class="card"><h2>Options compared</h2><div class="opt-head muted" style="font-size:12px"><span></span><span>Action</span><span class="hide-sm" style="text-align:right">Extra revenue</span><span class="hide-sm" style="text-align:right">Cost</span><span style="text-align:right">Extra profit</span></div>
-    <div class="opts">${rows}</div><p class="muted" style="font-size:12.5px">Assumptions: no-message reorder rate ${BASE_RATE*100}% in 14 days · lifts learned from past campaigns (start: reminder +8, free shipping +9, 10% off +10) · WhatsApp ₹${A.merchant.whatsapp_cost}/message · shipping ₹${A.merchant.shipping_cost} · gross margin ${A.merchant.gross_margin*100}%.</p></div>
-  <div class="card"><h2>Review and edit</h2><div class="form">
-    <div class="field"><label for="tmpl">Message template (pre-approved)</label><select id="tmpl" ${S.approved?'disabled':''}><option value="t1" ${S.template==="t1"?"selected":""}>Running low reminder</option><option value="t2" ${S.template==="t2"?"selected":""}>Routine is due</option></select><div class="msg">${TMPL[S.template](esc(s.name))}</div><span class="muted" style="font-size:12.5px">Only the fields in braces change. No AI-written text reaches customers.</span></div>
-    <div style="display:flex;flex-direction:column;gap:14px">
-      <div class="field"><label for="maxInc">Max incentive (% of order value)</label><input type="number" id="maxInc" min="0" max="30" value="${S.limits.maxInc}" ${S.approved?'disabled':''}></div>
-      <div class="field"><label for="freq">Max one message per customer every (days)</label><input type="number" id="freq" min="7" max="90" value="${S.limits.freq}" ${S.approved?'disabled':''}></div>
-      <div class="field"><label>Comparison group</label><span class="muted" style="font-size:14px">${S.limits.ctrl}% get no message (${fmt(nCtrl)}), so results show what the action really added.</span></div></div></div></div>
-  ${status || `<div class="actions"><button class="btn primary" id="approve" type="button" ${S.paused?'disabled':''}>Approve and send to ${fmt(nSend)}</button><select id="rejectReason" class="btn" aria-label="Reject with a reason"><option value="">Reject with a reason…</option><option>Not relevant</option><option>Wrong audience</option><option>Already know this</option><option>Don't discount these customers</option></select></div>`}`;
-}
-
-function vCustomer(){
-  const p=plan(); const name = p ? p.s.name : "Vitamin C Serum 30ml"; const price = p ? P[pidx(p.act.product_code)].price : 599;
-  const sheet = S.sheet===1 ? `<div class="sheet"><b>Reorder ${esc(name)}</b><div style="display:flex;justify-content:space-between"><span class="muted">1 × ₹${price} · same address</span><span class="num">₹${price}</span></div><div class="upi"><span class="label">Pay with UPI</span><button type="button" data-pay="1"><span>Your usual UPI app</span><span>→</span></button><button type="button" data-pay="1"><span>Saved card ending 4821</span><span>→</span></button></div></div>`
-    : S.sheet===2 ? `<div class="sheet" style="align-items:center;text-align:center"><span class="ic ok" style="width:44px;height:44px;font-size:22px">✓</span><b>Order placed</b><span class="muted" style="font-size:13px">₹${price} paid. Arriving Friday.</span></div>` : "";
-  return `<div class="head"><span class="label">Customer view</span><h1>The reminder closes the sale in one tap.</h1></div>
-  <div class="phonewrap"><div class="card"><h2>What happens</h2><ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px"><li>A pre-approved WhatsApp message goes out through Razorpay Engage.</li><li>One tap opens checkout with the last order filled in.</li><li>They pay with UPI or a saved card, so the result is measured exactly.</li></ol>
-    <p class="muted" style="font-size:14px">Only opted-in customers, never more than once every ${S.limits.freq} days.</p><div class="actions"><button class="btn primary" data-go="results" type="button">Go to results</button></div></div>
-  <div class="phone" aria-label="Phone preview of the customer message"><div class="ph-top"><span class="ph-av">D</span><div><b style="font-size:14px">Dewleaf Skincare</b><div style="font-size:11px;opacity:.85">Business account</div></div></div>
-    <div class="ph-body"><div class="bubble"><span>${TMPL[S.template](esc(name)).replace("{first_name}","Priya").replace("<b>{reorder_link}</b>","").replace("\n","<br>")}</span><span>Your usual: ${esc(name)}, ₹${price}</span><span class="t">10:02</span><button class="cta" type="button" id="reorderBtn">Reorder in one tap</button></div></div>${sheet}</div></div>`;
+function vSent(){
+  const p=plan(); if(!p||!S.approved) return vHome();
+  return `<div class="center">
+    <div class="done-badge">✓</div>
+    <h1>${S.approved.auto?"Sent on its own, within your rules":"Sent!"}</h1>
+    <p class="lead">${people(p.nSend)} regulars just got a friendly reminder on WhatsApp.</p>
+    <div class="mini-list">
+      <div><span class="em" aria-hidden="true">💳</span><span>${people(p.s.expired_card)} with an expired card got a card update link instead</span></div>
+      <div><span class="em" aria-hidden="true">⚖️</span><span>${people(p.nCtrl)} got nothing for now, so we can compare fairly</span></div>
+    </div>
+    <p class="muted">I'll tell you how it went in two weeks.</p>
+    <button class="btn primary big" id="ff" type="button">Skip ahead two weeks (demo)</button>
+    <button class="btn soft" data-go="home" type="button">Back to home</button>
+  </div>`;
 }
 
 function vResults(){
-  if (!S.approved) return S.decisions ? `<div class="empty"><b>Approve an action first</b><span>Results come from comparing messaged customers with the held-back group.</span><button class="btn primary" data-go="decide" type="button">Go to Decide</button></div>` : needRun();
-  if (!S.result) return `<div class="head"><span class="label">Waiting for results</span><h1>Measure what the action really added</h1></div><div class="card"><p>The test runs for 14 days. In this prototype you can jump ahead: customer responses are simulated from the sample data, so numbers differ each run.</p><div class="actions"><button class="btn primary" id="ff" type="button">Fast-forward 14 days</button></div></div>`;
-  const r=S.result; const mx=Math.max(r.rt,r.rc);
-  return `<div class="head"><span class="label">14 days later · 15 Oct 2026</span><h1>${r.extra_orders>0?`The ${r.action==="reminder"?"reminder":"action"} brought back ${fmt(r.extra_orders)} extra orders.`:"No clear effect this time."}</h1><p class="muted">Compared with ${fmt(r.nCtrl)} similar customers who got no message.</p></div>
-  <div class="card"><h2>Reordered within 14 days</h2><div class="bars">
-    <div class="bar-row"><span>Messaged <span class="muted num">(${fmt(r.nSend)})</span></span><div class="track"><div class="fill" style="width:${r.rt/mx*100}%;background:var(--accent)"></div></div><span class="num" style="font-weight:600">${r.rt.toFixed(1)}%</span></div>
-    <div class="bar-row"><span>No message <span class="muted num">(${fmt(r.nCtrl)})</span></span><div class="track"><div class="fill" style="width:${r.rc/mx*100}%;background:var(--ctrl)"></div></div><span class="num" style="font-weight:600">${r.rc.toFixed(1)}%</span></div></div>
-    <p class="muted" style="font-size:14px">Some would have come back anyway (grey). Sentinel only counts the difference.</p></div>
-  <div class="grid4"><div class="card stat"><span class="v num">${r.lift>=0?"+":""}${r.lift.toFixed(1)} pts</span><span class="k">reorder rate vs no message</span></div><div class="card stat"><span class="v num">${fmt(r.extra_orders)}</span><span class="k">extra orders</span></div><div class="card stat"><span class="v num">${inr(r.extra_revenue)}</span><span class="k">extra revenue recovered</span></div><div class="card stat"><span class="v num">${inr(r.cost)}</span><span class="k">cost</span></div></div>
-  <div class="card"><span class="label" style="color:var(--accent)">What Sentinel learned</span><p>Expected +${r.expected} pts, measured ${r.lift>=0?"+":""}${r.lift.toFixed(1)}. The estimate for this action is now +${r.updated} pts, saved to memory, and the agent sees this result on the next run.</p>
-    <div class="actions"><button class="btn primary" id="rerun" type="button">Run Sentinel again with what it learned</button></div></div>
-  <div class="card"><h2>Let Sentinel run this on its own next time?</h2><p class="muted">${esc(labelOf(r.action))} for ${esc(pname(r.product))} regulars, within your limits. Pause anytime. Anything else still needs your approval.</p>
-    ${S.autoOk[r.product+":"+r.action]?`<div class="banner ok">Done. Autonomy level 3 for this one action.</div>`:`<div class="actions"><button class="btn primary" id="autoYes" type="button">Yes, within my limits</button><button class="btn" id="autoNo" type="button">Not yet</button></div>`}</div>`;
+  const r=S.result; if(!r) return vHome();
+  const good=r.extra_orders>0;
+  const ppl=slipping(r.product,6);
+  const max=Math.max(r.rt,r.rc);
+  return `<button class="back" data-go="home" type="button">← Home</button>
+  <div class="center wide">
+    <span class="eyebrow dark">Two weeks later</span>
+    <h1>${good?"It worked":"Not much difference this time"}</h1>
+    <div class="stack">${ppl.map(x=>avatar(x,44)).join("")}<span class="plus">+${people(Math.max(0,r.extra_orders-ppl.length))}</span></div>
+    <p class="lead">${good?`<b>${people(r.extra_orders)} more regulars</b> came back than would have on their own. That's about <b>${money(r.extra_revenue)}</b>, for ${money(r.cost)}.`:"The reminder didn't move people this time. I'll try something different next time."}</p>
+    <div class="compare">
+      <div class="row"><span>Got the reminder</span><div class="bar"><i style="width:${r.rt/max*100}%"></i></div><b>${oneIn(r.rt).replace("about ","")} reordered</b></div>
+      <div class="row"><span>Didn't get it</span><div class="bar grey"><i style="width:${r.rc/max*100}%"></i></div><b>${oneIn(r.rc).replace("about ","")} reordered</b></div>
+    </div>
+    <div class="note"><span class="big-emoji" aria-hidden="true">💡</span><p><b>What I learned:</b> ${r.action==="reminder"?"a plain reminder is enough for these regulars. I'll start with this next time and keep discounts for when it's really needed.":"I'll compare this with a plain reminder next time."}</p></div>
+    ${S.autoOk[r.product+":"+r.action]?`<div class="note ok"><p>Done. Next time I'll send this kind of reminder on my own, within your rules. Anything else still comes to you first.</p></div>`:
+      `<div class="ask"><h3>Want me to do this on my own next time?</h3><p class="muted">Only this kind of reminder, only within your rules. You can pause me anytime.</p><div class="cta-sub"><button class="btn primary" id="autoYes" type="button">Yes, go ahead</button><button class="btn soft" id="autoNo" type="button">Keep asking me</button></div></div>`}
+    <button class="btn soft" id="rerun" type="button">Check my store again</button>
+  </div>`;
 }
 
-function vActivity(){
-  return `<div class="head"><span class="label">Audit trail</span><h1>Everything Sentinel did, and why</h1><p class="muted">Every check, decision, guardrail change and action, in order, saved to Supabase. Nothing happens off the record.</p></div>
-  <div class="actions"><button class="btn" id="resetMem" type="button">Reset demo memory</button><span class="muted" style="font-size:13px">Starts the agent fresh: past campaigns, feedback and learning are set aside.</span></div>
-  ${S.log.length?`<div class="agentlog" id="fulllog" style="max-height:none">${logHtml(S.log)}</div>`:needRun()}`;
+function activityList(){
+  const rows=S.log.filter(e=>e.who!=="sep").slice(-80).reverse();
+  if(!rows.length) return `<p class="muted">Nothing yet. Run a check from Home.</p>`;
+  const who={ai:"AI agent",code:"Sentinel",guard:"Your rules",you:"You"};
+  return rows.map(e=>`<div class="act-row"><span class="who ${e.who}">${who[e.who]||""}</span><div><b>${esc(e.text)}</b>${e.res?`<span>${esc(e.res)}</span>`:""}</div><span class="t">${e.t}</span></div>`).join("");
 }
+function vActivity(){
+  return `<h1>Everything Sentinel did</h1><p class="lead">Every check, decision and message, in order. Saved, so nothing happens off the record.</p>
+  <div class="activity" id="activity">${activityList()}</div>
+  <button class="btn soft" id="resetMem" type="button">Start the demo fresh</button>`;
+}
+
+function vSettings(){
+  return `<h1>Your rules</h1><p class="lead">Sentinel never goes past these.</p>
+  <div class="rules">
+    <div class="rule"><div><b>Biggest discount I can offer</b><span>${S.limits.maxInc}% of the order</span></div><div class="stepper"><button type="button" data-step="maxInc:-1" aria-label="Lower">−</button><b>${S.limits.maxInc}%</b><button type="button" data-step="maxInc:1" aria-label="Raise">+</button></div></div>
+    <div class="rule"><div><b>Message each customer at most</b><span>once every ${S.limits.freq} days</span></div><div class="stepper"><button type="button" data-step="freq:-5" aria-label="Fewer days">−</button><b>${S.limits.freq}d</b><button type="button" data-step="freq:5" aria-label="More days">+</button></div></div>
+    <div class="rule"><div><b>Keep some aside to measure fairly</b><span>1 in 10 customers get no message</span></div><span class="pill ok">Always on</span></div>
+    <div class="rule"><div><b>Let Sentinel act on its own</b><span>${S.autonomy===3?"Only for actions you've approved before":"Off. It always asks you first"}</span></div><button class="switch ${S.autonomy===3?"on":""}" id="autoToggle" type="button" aria-pressed="${S.autonomy===3}"><i></i></button></div>
+    <div class="rule"><div><b>Pause Sentinel</b><span>${S.paused?"Paused. It won't check or send anything":"On. Watching your store"}</span></div><button class="switch ${S.paused?"":"on"}" id="pauseToggle" type="button" aria-pressed="${!S.paused}"><i></i></button></div>
+  </div>`;
+}
+
+/* bottom sheets */
+function sheet(){
+  if(!S.sheetOpen) return "";
+  let body="";
+  if (S.sheetOpen==="options"){
+    const p=plan(); const opts=estimate(p.act.product_code);
+    const words={reminder:"Cheapest. Usually all it takes.", free_ship:"A bit more pull, but costs more.", discount:"Most pull, but gives money away to people who'd buy anyway."};
+    body=`<h2>Other ways to bring them back</h2>${opts.map(o=>`<button class="opt ${S.choice===o.action?"sel":""}" data-opt="${o.action}" type="button" ${o.allowed_by_merchant_limits?"":"disabled"}>
+      <div><b>${ACT_COPY[o.action].title}</b><span>${o.allowed_by_merchant_limits?words[o.action]:`🔒 Locked. It's more than your ${S.limits.maxInc}% discount limit.`}</span></div>
+      <span class="val">${o.allowed_by_merchant_limits?`about ${money(o.extra_profit)} extra profit`:`<a href="#" data-go="settings">Change limit</a>`}</span></button>`).join("")}
+      <p class="muted">I recommend the one with the most profit after costs.</p>`;
+  } else if (S.sheetOpen==="notnow"){
+    body=`<h2>No problem. Tell me why?</h2><p class="muted">It helps me suggest better next time.</p><div class="chips">${["Not the right time","Wrong customers","I already knew this","Don't discount these customers"].map(t=>`<button class="chip" data-reason="${esc(t)}" type="button">${t}</button>`).join("")}</div>`;
+  } else {
+    const code=S.sheetOpen, d=S.decisions?.find(x=>x.product_code===code), s=S.scan?.find(x=>x.code===code);
+    const what = d.decision==="act"?"":
+      d.reason==="stockout"?"No messages sent. I sent you a restock reminder instead.":
+      d.reason==="seasonal"?"No messages sent. This dip fixes itself every year.":"Nothing to do.";
+    body=`<div class="sheet-prod">${tile(code,120)}<div><h2>${SHORT[code]}</h2><p>${esc(d.headline)}</p></div></div>
+      <p>${esc(d.found||"")}</p>${d.reason==="seasonal"?`<p class="muted">Usually every ${weeks(s.usual_days)}, now ${weeks(s.now_days)}. Same thing happened last monsoon.</p>`:""}
+      ${what?`<div class="note"><p>${what}</p></div>`:`<button class="btn primary" data-go="suggest" type="button">See what I'd do</button>`}`;
+  }
+  return `<div class="scrim" id="scrim"></div><div class="sheet" role="dialog" aria-modal="true"><span class="grab"></span>${body}<button class="btn soft close" id="closeSheet" type="button">Close</button></div>`;
+}
+
+function nav(){
+  const items=[["home","Home",'<path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/>'],["activity","Activity",'<path d="M4 6h16M4 12h16M4 18h10"/>'],["settings","Rules",'<path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8 4l-2-1 1-2-2-2-2 1-1-2h-4l-1 2-2-1-2 2 1 2-2 1v4l2 1-1 2 2 2 2-1 1 2h4l1-2 2 1 2-2-1-2 2-1z"/>']];
+  return items.map(([id,t,d])=>`<button class="navbtn ${S.view===id||(id==="home"&&["suggest","sent","results"].includes(S.view))?"on":""}" data-go="${id}" type="button" aria-label="${t}"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">${d}</svg><span>${t}</span></button>`).join("");
+}
+
+function go(v){ S.view=v; S.sheetOpen=null; render(); window.scrollTo({top:0}); }
+function toast(t){ const el=$("toast"); el.textContent=t; el.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>el.hidden=true,2600); }
 
 function render(){
-  rail();
-  $("main").innerHTML = ({run:vRun, evidence:vEvidence, decide:vDecide, customer:vCustomer, results:vResults, activity:vActivity})[S.step]();
-  const m=$("main");
-  m.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
-  m.querySelectorAll("[data-alert]").forEach(b=>b.onclick=()=>{ if(b.dataset.dec==="act"){ go("evidence"); return; } S.open=S.open===b.dataset.alert?null:b.dataset.alert; render(); });
-  const rb=$("runBtn"); if(rb) rb.onclick=()=>runSentinel(false);
-  const sb=$("stop"); if(sb) sb.onclick=()=>S.ctl?.abort();
-  m.querySelectorAll('input[name="opt"]').forEach(r=>r.onchange=()=>{ S.choice=r.value; render(); });
-  const t=$("tmpl"); if(t) t.onchange=()=>{ S.template=t.value; render(); };
-  const mi=$("maxInc"); if(mi) mi.onchange=()=>{ S.limits.maxInc=Math.max(0,+mi.value||0); const o=estimate(plan().act.product_code).find(x=>x.action===S.choice); if(o&&!o.allowed_by_merchant_limits){ S.choice="reminder"; } addLog("you",`Changed incentive limit to ${S.limits.maxInc}%`,""); render(); toast("Limit saved"); };
-  const fq=$("freq"); if(fq) fq.onchange=()=>{ S.limits.freq=Math.max(7,+fq.value||30); addLog("you",`Changed message limit to one per ${S.limits.freq} days`,""); render(); toast("Limit saved"); };
-  const ap=$("approve"); if(ap) ap.onclick=()=>{ approve(false); render(); toast("Approved and sent"); };
-  const rj=$("rejectReason"); if(rj) rj.onchange=()=>{ if(!rj.value) return; S.rejected=rj.value; const fb={product:pname(plan().act.product_code), action:S.choice, merchant_said:rj.value}; S.feedback.push(fb); post("feedback",fb); addLog("you",`Rejected: ${rj.value}`,"saved as feedback for the next run"); render(); toast("Feedback saved"); };
-  const ro=$("reorderBtn"); if(ro) ro.onclick=()=>{ S.sheet=1; render(); };
-  m.querySelectorAll("[data-pay]").forEach(b=>b.onclick=()=>{ S.sheet=2; render(); });
-  const ff=$("ff"); if(ff) ff.onclick=()=>{ fastForward(); render(); };
-  const re=$("rerun"); if(re) re.onclick=()=>{ go("run"); runSentinel(false); };
-  const ay=$("autoYes"); if(ay) ay.onclick=()=>{ S.autoOk[S.result.product+":"+S.result.action]=true; S.autonomy=3; addLog("you",`Pre-approved: ${labelOf(S.result.action)} for ${pname(S.result.product)}`,"autonomy level 3 for this action only"); render(); };
-  const rm=$("resetMem"); if(rm) rm.onclick=async()=>{ await flush(); await post("reset",{}); S.lifts={reminder:8,free_ship:9,discount:10}; S.history=[]; S.feedback=[]; S.log=[]; S.decisions=null; S.approved=null; S.result=null; S.autoOk={}; S.autonomy=2; render(); toast("Memory reset. The agent starts fresh."); };
-  const an=$("autoNo"); if(an) an.onclick=()=>toast("Okay. Sentinel will keep asking first.");
-  const al=$("agentlog"); if(al) al.scrollTop=al.scrollHeight;
+  if(!A) return;
+  $("status").innerHTML = `<span class="live ${S.paused?"off":""}"></span>${S.paused?"Paused":"Watching"}`;
+  $("main").innerHTML = ({home:vHome, suggest:vSuggest, sent:vSent, results:vResults, activity:vActivity, settings:vSettings})[S.view]();
+  $("sheetHost").innerHTML = sheet();
+  $("nav").innerHTML = nav();
+  bind();
+}
+
+function bind(){
+  document.querySelectorAll("[data-go]").forEach(b=>b.onclick=e=>{ e.preventDefault(); go(b.dataset.go); });
+  document.querySelectorAll("[data-prod]").forEach(b=>b.onclick=()=>{ const d=S.decisions?.find(x=>x.product_code===b.dataset.prod); if(d?.decision==="act"){ go("suggest"); } else { S.sheetOpen=b.dataset.prod; render(); } });
+  document.querySelectorAll("[data-sheet]").forEach(b=>b.onclick=()=>{ S.sheetOpen=b.dataset.sheet; render(); });
+  const close=()=>{ S.sheetOpen=null; render(); };
+  $("scrim")&&($("scrim").onclick=close); $("closeSheet")&&($("closeSheet").onclick=close);
+  document.querySelectorAll("[data-opt]").forEach(b=>b.onclick=()=>{ S.choice=b.dataset.opt; addLog("you",`Chose: ${labelOf(S.choice)}`,""); close(); });
+  document.querySelectorAll("[data-reason]").forEach(b=>b.onclick=()=>{ const fb={product:pname(plan().act.product_code), action:S.choice, merchant_said:b.dataset.reason}; S.feedback.push(fb); post("feedback",fb); S.rejected=fb.merchant_said; addLog("you",`Said not now: ${fb.merchant_said}`,"saved for next time"); S.sheetOpen=null; go("home"); toast("Got it. I'll remember that."); });
+  const rb=$("runBtn"); if(rb) rb.onclick=()=>{ S.runStart=S.log.length; runSentinel(false); };
+  const st=$("stop"); if(st) st.onclick=()=>S.ctl?.abort();
+  const sd=$("send"); if(sd) sd.onclick=()=>{ approve(false); go("sent"); };
+  const ff=$("ff"); if(ff) ff.onclick=()=>{ fastForward(); go("results"); };
+  const re=$("rerun"); if(re) re.onclick=()=>{ go("home"); S.runStart=S.log.length; runSentinel(false); };
+  const ay=$("autoYes"); if(ay) ay.onclick=()=>{ S.autoOk[S.result.product+":"+S.result.action]=true; S.autonomy=3; addLog("you",`Let Sentinel send ${labelOf(S.result.action)} on its own`,"only within your rules"); render(); };
+  const an=$("autoNo"); if(an) an.onclick=()=>toast("Okay. I'll always ask first.");
+  const rm=$("resetMem"); if(rm) rm.onclick=async()=>{ await flush(); await post("reset",{}); Object.assign(S,{lifts:{reminder:8,free_ship:9,discount:10},history:[],feedback:[],log:[],decisions:null,approved:null,result:null,autoOk:{},autonomy:2,choice:null}); go("home"); toast("Fresh start. Past results set aside."); };
+  document.querySelectorAll("[data-step]").forEach(b=>b.onclick=()=>{ const [k,v]=b.dataset.step.split(":"); const lim={maxInc:[0,30],freq:[7,90]}[k]; S.limits[k]=Math.min(lim[1],Math.max(lim[0],S.limits[k]+Number(v))); addLog("you",k==="maxInc"?`Set biggest discount to ${S.limits.maxInc}%`:`Set messages to once every ${S.limits.freq} days`,""); if(S.choice==="discount"&&S.limits.maxInc<10) S.choice="reminder"; render(); });
+  const at=$("autoToggle"); if(at) at.onclick=()=>{ S.autonomy=S.autonomy===3?2:3; if(S.autonomy===2) S.autoOk={}; addLog("you",S.autonomy===3?"Allowed Sentinel to act on its own for approved actions":"Turned off acting on its own",""); render(); };
+  const pt=$("pauseToggle"); if(pt) pt.onclick=()=>{ S.paused=!S.paused; if(S.paused&&S.running) S.ctl?.abort(); addLog("you",S.paused?"Paused Sentinel":"Turned Sentinel back on",""); render(); };
 }
 
 async function boot(){
-  $("main").innerHTML=`<div class="empty"><b>Loading sample data…</b></div>`;
-  A = await (await fetch("/data/app_data.json")).json(); P=A.products; C=A.customers; NC=C.p.length;
-  $("merchantChip").textContent = A.merchant.name + " · ₹" + A.merchant.annual_revenue_cr + " Cr/yr";
+  $("main").innerHTML=`<p class="muted" style="padding:40px 0">Loading…</p>`;
+  A = await (await fetch("/app_data.json")).json(); P=A.products; C=A.customers; NC=C.p.length;
   await loadMemory();
+  S.log = S.log.filter(e=>e.who!=="sep");
   render();
 }
-$("pauseBtn").onclick = () => { S.paused=!S.paused; $("pauseBtn").setAttribute("aria-pressed", S.paused); $("pauseLbl").textContent=S.paused?"Agent paused":"Agent on"; if(S.paused&&S.running) S.ctl?.abort(); addLog("you", S.paused?"Paused the agent":"Turned the agent back on", ""); render(); };
 boot();
