@@ -455,6 +455,7 @@ function activityList(){
 function vActivity(){
   return `<h1>Everything Sentinel did</h1><p class="lead">Every check, decision and message, in order. Saved, so nothing happens off the record.</p>
   <div class="activity" id="activity">${activityList()}</div>
+  <div class="note"><span class="big-emoji" aria-hidden="true">ℹ️</span><p><b>About this prototype:</b> it runs on sample data for a fictional brand. Customer responses and the two-week results are simulated. Spotting the same customer across orders would rely on Razorpay Magic Checkout. The AI agent runs live on Google Gemini's free tier and switches to backup rules when it's busy.</p></div>
   <button class="btn soft" id="resetMem" type="button">Start the demo fresh</button>`;
 }
 
