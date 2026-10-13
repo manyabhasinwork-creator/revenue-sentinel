@@ -211,12 +211,14 @@ async function runSentinel(useOffline){
   if (!useOffline){
     S.mode="live"; const busy=addLog("ai","Gemini is investigating and deciding","", "busy");
     S.ctl=new AbortController(); S.elapsed=0; clearInterval(S.timer); S.timer=setInterval(()=>{S.elapsed++; const el=$("elapsed"); if(el) el.textContent=S.elapsed+"s";},1000);
+    S.timedOut=false; const cap=setTimeout(()=>{ S.timedOut=true; S.ctl.abort(); }, 35000);
     try { raw = await callAgent(prompt(), S.ctl.signal); finish(busy,"Decided"); }
     catch(e){
-      if (e.name==="AbortError"){ finish(busy,"Stopped"); clearInterval(S.timer); S.running=false; render(); return; }
+      if (e.name==="AbortError" && !S.timedOut){ clearTimeout(cap); finish(busy,"Stopped"); clearInterval(S.timer); S.running=false; render(); return; }
+      if (S.timedOut) e = new Error("AI was too slow, over 35s");
       finish(busy, `Couldn't reach the AI (${e.message}). Using offline rules instead.`); raw=null;
     }
-    clearInterval(S.timer);
+    clearTimeout(cap); clearInterval(S.timer);
   }
   if (!raw){ S.mode = S.mode==="live" ? "fallback" : "offline"; raw=offlineDecide(); addLog("code","Offline rules decided (no AI)", ""); }
   S.decisions = guard(raw);
