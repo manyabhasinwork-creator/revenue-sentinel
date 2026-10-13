@@ -16,7 +16,7 @@ Revenue Sentinel is an AI agent that spots a D2C brand's regular customers reord
 | **A second AI assistant** | An independent critique of my product note, to catch blind spots Claude might share with me. |
 | **Google Gemini API (free tier), `gemini-3.5-flash-lite`** | The live agent inside the product. It calls tools, investigates and decides. |
 | **Vercel** (hosting + serverless functions), **GitHub** (code), **Supabase** (agent memory) | Infrastructure, all on free tiers. |
-| **Mobbin** (Shop app screens) | Visual reference for the redesign. Not an AI tool. |
+| **Mobbin** | Consumer app design references for the redesign. Not an AI tool. |
 
 I went through three Gemini models:
 
@@ -28,13 +28,15 @@ I went through three Gemini models:
 
 ## 2. Key prompts, workflows and agent setup
 
-### How I worked with Claude
+### Workflow with Claude
 
-1. **Research:** "Research what Razorpay is already doing with agentic AI, and what payment companies in other geographies are doing, keeping the Track 2 brief in mind."
-2. **Ideate and stress-test:** "This needs to be different from what everyone else would choose." Then "Can you stress test this idea?" and "Does this really help increase revenue?" for each candidate.
-3. **Build:** "Let's start building this. Remember, every time we stray from the assignment brief, you bring us back." I used this standing rule to keep scope tight.
-4. **Redesign:** "We need to make the UI much, much simpler and accessible… it shouldn't feel like a banking app… very much like Shop's. It's not numbers-led at all."
-5. **Verify:** "Go through this doc again. Absolutely everything needs to be bang on." Claude checked every number in the one-pager against the live app and the raw data.
+| Stage | What I asked AI to do |
+|---|---|
+| **Research** | Map Razorpay's existing AI and agentic products, and comparable offerings from payment companies in other markets, against the Track 2 brief. Identify where a gap remains. |
+| **Ideate and test** | Generate distinct product directions, then challenge each one: does it grow merchant revenue, is it feasible for Razorpay, and what could go wrong? |
+| **Build** | Build the prototype step by step, checking each addition against the brief to keep the scope focused on one merchant, one problem and one action. |
+| **Redesign** | Simplify the interface for a busy, non-technical merchant: plain language, visual cues, one decision per screen, fully accessible. |
+| **Verify** | Check every number and claim in the submission against the live prototype and the underlying data before submitting. |
 
 ### Agent architecture
 
@@ -79,7 +81,7 @@ The agent must reply in a fixed JSON format. For each product, it states:
 - what it doesn't know
 - its confidence
 
-**Safety in the setup:**
+**Safeguards in the setup:**
 
 - The Gemini key stays on the server.
 - The proxy only accepts this app's prompt and these six tool names.
@@ -92,7 +94,7 @@ The agent must reply in a fixed JSON format. For each product, it states:
 
 ### Main example: a wrong headline number in my one-pager
 
-Claude drafted my one-pager with a headline stat: **"2 of 3 slowdowns were false alarms (stockout, season), so the agent held back."** It read well and matched the story I had been telling.
+An AI-drafted version of my one-pager included the headline stat **"2 of 3 slowdowns were false alarms (stockout, season), so the agent held back."** It read well and fitted the narrative.
 
 Before submitting, I asked for every number to be checked against the live app rather than earlier drafts. The check showed the claim was **wrong**:
 
@@ -105,14 +107,14 @@ Before submitting, I asked for every number to be checked against the live app r
 - replaced a rounded figure with the exact count, 6,656 customers
 - removed three claims I could not prove
 
-I also changed my demo script, which had been built around the same wrong sunscreen story.
+The demo script was updated to match.
 
-**Why it matters:** the AI wrote a confident, plausible summary of the product rather than of the data. A judge clicking through the prototype would have seen the mismatch. My rule is that every number in a submission is traced back to the data or the code.
+**Why it matters:** the AI summarised the intended story rather than the actual data. Anyone using the prototype would have seen the mismatch. My rule is that every number in a submission is traced back to the data or the code.
 
 ### Other things I overruled
 
-- **Idea choice.** An early strong candidate was "discount leakage". I dropped it because it is a cost story, and the brief asks for revenue growth.
-- **The first UI.** The AI's first version was a number-heavy dashboard with many tabs. When I tested it myself, it felt like a banking app. I directed a full redesign: picture-led, one decision at a time, plain language, rupees and weeks instead of ratios.
+- **Idea choice.** An early candidate focused on reducing discount leakage. I set it aside because it saves cost, while the brief asks for revenue growth.
+- **The first UI.** The AI's first version was a data-heavy dashboard with several tabs. When I tested it, it asked too much of a busy merchant. I directed a full redesign: visual, one decision at a time, plain language, and rupees and weeks instead of ratios.
 
 ---
 
@@ -121,11 +123,11 @@ I also changed my demo script, which had been built around the same wrong sunscr
 | AI did | I decided or did |
 |---|---|
 | Researched Razorpay's products (Agent Studio, Engage, Magic Checkout and others) and global peers | Chose Track 2 and the problem: repeat revenue quietly slipping away |
-| Generated about 8 ideas and stress-tested them | Rejected ideas that were cost stories or that classmates would pick |
+| Generated about 8 ideas and stress-tested them | Selected the final idea, and set aside ideas that cut costs rather than grew revenue |
 | Wrote the data generator, agent loop, tools, guardrails, UI code and API functions | Set the product principles: restraint as a feature, smallest nudge first, always hold back a control group, the merchant approves |
 | Suggested thresholds and the learning rule | Chose free tools only, and accepted rate limits in exchange for backup rules |
-| Drafted the product note and one-pager | Set up GitHub, Vercel, Supabase and the Gemini key myself (the key was never shared in chat) |
-| Debugged deployment problems (wrong folder paths, unavailable model, quota limits, slow responses) | Tested the UI and directed the redesign, using Shop as the reference |
+| Drafted the product note and one-pager | Set up GitHub, Vercel, Supabase and the Gemini key myself, keeping credentials private |
+| Debugged deployment problems (folder paths, model availability, quota limits, slow responses) | Tested the UI and directed the redesign |
 | Fact-checked the documents against the data | Chose what to leave out: chatbot, dashboard, campaign builder, AI-written customer messages, autopilot |
 
 ---
@@ -142,10 +144,10 @@ I also changed my demo script, which had been built around the same wrong sunscr
 
 ### Risks
 
-- **Over-messaging customers.** Mitigated by a cap of one message per customer every 30 days, opted-in customers only, pre-approved templates and opt-out tracking.
+- **Over-messaging customers.** Mitigated by a frequency limit (one message per customer every 30 days), messaging only opted-in customers, pre-approved templates, and opt-out rate as a guardrail metric.
 - **The AI recommending spend when the cause is elsewhere.** Mitigated by guardrails in code that override the AI on stockouts and seasonal dips.
 - **Overstated impact.** Mitigated by measuring every action against a held-back 10% of customers.
-- **Prototype security.** The demo has no login, so anyone with the link can run it or reset its memory. The database only allows reading and adding rows.
+- **Prototype access.** The demo is open without a login so reviewers can try it, and the database only allows reading and adding records. A production version would add merchant authentication and role-based access.
 
 ### Verification steps
 
